@@ -17,47 +17,52 @@
         }
         canvas {
             border: 2px solid #333;
-            background-color: #fff;
+            background: url('/assets/backgrounds/mysterious_arena.png');
+            background-size: cover;
             display: none;
         }
-        #menu, #loginScreen, #characterScreen, #mapScreen {
+        #menu, #loginScreen, #characterScreen, #mapScreen, #gameOverScreen {
             text-align: center;
-            background: rgba(255, 255, 255, 0.9);
+            background: rgba(255, 255, 255, 0.95);
             padding: 20px;
             border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 0 15px rgba(0, 0, 0, 0.5);
+            animation: fadeIn 0.5s;
         }
-        #menu h1, #loginScreen h2, #characterScreen h2, #mapScreen h2 {
-            margin: 0 0 20px;
-        }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        h1, h2 { margin: 0 0 20px; color: #333; }
         button, input {
-            padding: 10px;
-            margin: 5px;
+            padding: 12px;
+            margin: 8px;
             font-size: 16px;
+            border: none;
+            border-radius: 5px;
             cursor: pointer;
+            background: #007bff;
+            color: white;
+            transition: background 0.3s;
         }
-        #controls {
+        button:hover { background: #0056b3; }
+        input { background: #f8f8f8; color: #333; }
+        #controls, #hud {
             position: absolute;
-            top: 10px;
-            left: 10px;
             background: rgba(255, 255, 255, 0.8);
             padding: 10px;
             border-radius: 5px;
-            display: none;
         }
+        #controls { top: 10px; left: 10px; display: none; }
+        #hud { top: 10px; right: 10px; display: none; }
         .character-option, .map-option {
             display: inline-block;
-            margin: 10px;
+            margin: 15px;
             cursor: pointer;
-            border: 2px solid transparent;
+            border: 3px solid transparent;
+            transition: border 0.3s;
         }
-        .character-option:hover, .map-option:hover {
-            border: 2px solid #333;
-        }
-        .character-option img, .map-option img {
-            width: 64px;
-            height: 64px;
-        }
+        .character-option:hover, .map-option:hover { border: 3px solid #007bff; }
+        .character-option img, .map-option img { width: 64px; height: 64px; }
+        #leaderboard { margin-top: 20px; }
+        #leaderboard li { list-style: none; margin: 5px 0; }
     </style>
 </head>
 <body>
@@ -70,22 +75,22 @@
         <h2>Login / Register</h2>
         <input type="text" id="username" placeholder="Username"><br>
         <input type="password" id="password" placeholder="Password"><br>
-        <button onclick="login()">Login</button>
         <button onclick="register()">Register</button>
+        <button onclick="login()">Login</button>
         <button onclick="showMenu()">Back</button>
     </div>
     <div id="characterScreen" style="display: none;">
         <h2>Select Character</h2>
         <div class="character-option" onclick="selectCharacter('warrior')">
-            <img src="https://via.placeholder.com/32/FF0000" alt="Warrior">
+            <img src="/assets/sprites/warrior.png" alt="Warrior">
             <p>Warrior (High Health)</p>
         </div>
         <div class="character-option" onclick="selectCharacter('archer')">
-            <img src="https://via.placeholder.com/32/00FF00" alt="Archer">
+            <img src="/assets/sprites/archer.png" alt="Archer">
             <p>Archer (Fast Attack)</p>
         </div>
         <div class="character-option" onclick="selectCharacter('scout')">
-            <img src="https://via.placeholder.com/32/0000FF" alt="Scout">
+            <img src="/assets/sprites/scout.png" alt="Scout">
             <p>Scout (High Speed)</p>
         </div>
         <button onclick="showLogin()">Back</button>
@@ -93,23 +98,35 @@
     <div id="mapScreen" style="display: none;">
         <h2>Select Map</h2>
         <div class="map-option" onclick="selectMap('open')">
-            <img src="https://via.placeholder.com/32/CCCCCC" alt="Open Field">
+            <img src="/assets/backgrounds/open_field.png" alt="Open Field">
             <p>Open Field</p>
         </div>
         <div class="map-option" onclick="selectMap('fortress')">
-            <img src="https://via.placeholder.com/32/666666" alt="Fortress">
+            <img src="/assets/backgrounds/fortress.png" alt="Fortress">
             <p>Fortress</p>
         </div>
         <button onclick="showCharacterScreen()">Back</button>
+    </div>
+    <div id="gameOverScreen" style="display: none;">
+        <h2>Game Over</h2>
+        <p id="finalScore"></p>
+        <ul id="leaderboard"></ul>
+        <button onclick="showMenu()">Main Menu</button>
     </div>
     <div id="controls">
         <p><strong>Controls:</strong></p>
         <p>WASD: Move</p>
         <p>Mouse: Aim & Shoot</p>
-        <p>R: Restart</p>
+    </div>
+    <div id="hud">
+        <p>Score: <span id="score">0</span></p>
+        <p>Health: <span id="health">100</span></p>
+        <p>Player: <span id="playerName"></span></p>
     </div>
     <canvas id="gameCanvas" width="800" height="600"></canvas>
+    <script src="/socket.io/socket.io.js"></script>
     <script>
+        const socket = io();
         const canvas = document.getElementById('gameCanvas');
         const ctx = canvas.getContext('2d');
 
@@ -123,20 +140,29 @@
         // Game state
         let gameState = 'menu';
         let player = null;
+        let players = {};
         let bullets = [];
         let enemies = [];
         let powerUps = [];
-        let otherPlayers = []; // Simulated multiplayer
         let walls = [];
         let score = 0;
         let currentMap = 'open';
         let currentUser = null;
+        let particles = [];
+
+        // Assets
+        const sounds = {
+            shoot: new Audio('/assets/sounds/shoot.mp3'),
+            collect: new Audio('/assets/sounds/collect.mp3'),
+            bgm: new Audio('/assets/sounds/bgm.mp3')
+        };
+        sounds.bgm.loop = true;
 
         // Character stats
         const characters = {
-            warrior: { health: 150, speed: 4, bulletCooldown: 600, sprite: 'https://via.placeholder.com/32/FF0000' },
-            archer: { health: 100, speed: 5, bulletCooldown: 300, sprite: 'https://via.placeholder.com/32/00FF00' },
-            scout: { health: 80, speed: 7, bulletCooldown: 500, sprite: 'https://via.placeholder.com/32/0000FF' }
+            warrior: { health: 150, speed: 4, bulletCooldown: 600, sprite: '/assets/sprites/warrior.png' },
+            archer: { health: 100, speed: 5, bulletCooldown: 300, sprite: '/assets/sprites/archer.png' },
+            scout: { health: 80, speed: 7, bulletCooldown: 500, sprite: '/assets/sprites/scout.png' }
         };
 
         // Map definitions
@@ -164,9 +190,8 @@
         });
         canvas.addEventListener('click', () => {
             if (gameState === 'playing' && player && Date.now() - player.lastShot >= player.bulletCooldown) {
-                shootBullet(player);
-                player.lastShot = Date.now();
-                // const shootSound = new Audio('shoot.mp3'); shootSound.play();
+                socket.emit('shoot', { x: player.x, y: player.y, mouseX: mouse.x, mouseY: mouse.y });
+                sounds.shoot.play();
             }
         });
 
@@ -177,8 +202,11 @@
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('characterScreen').style.display = 'none';
             document.getElementById('mapScreen').style.display = 'none';
+            document.getElementById('gameOverScreen').style.display = 'none';
             canvas.style.display = 'none';
             document.getElementById('controls').style.display = 'none';
+            document.getElementById('hud').style.display = 'none';
+            sounds.bgm.pause();
         }
 
         function showLogin() {
@@ -199,33 +227,47 @@
             document.getElementById('mapScreen').style.display = 'block';
         }
 
-        // Login/Registration (client-side)
-        function register() {
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
-            if (username && password) {
-                const users = JSON.parse(localStorage.getItem('users') || '{}');
-                if (users[username]) {
-                    alert('Username already exists!');
-                } else {
-                    users[username] = password;
-                    localStorage.setItem('users', JSON.stringify(users));
-                    alert('Registered successfully! Please login.');
-                }
-            } else {
-                alert('Please enter username and password.');
-            }
+        function showGameOver() {
+            gameState = 'gameOver';
+            canvas.style.display = 'none';
+            document.getElementById('controls').style.display = 'none';
+            document.getElementById('hud').style.display = 'none';
+            document.getElementById('gameOverScreen').style.display = 'block';
+            document.getElementById('finalScore').textContent = `Final Score: ${score}`;
+            socket.emit('saveScore', { username: currentUser, score });
+            socket.emit('getLeaderboard');
+            sounds.bgm.pause();
         }
 
-        function login() {
+        // Authentication
+        async function register() {
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
-            const users = JSON.parse(localStorage.getItem('users') || '{}');
-            if (users[username] === password) {
+            const response = await fetch('/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+            const result = await response.json();
+            alert(result.message);
+            if (result.success) showLogin();
+        }
+
+        async function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const response = await fetch('/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+            const result = await response.json();
+            if (result.success) {
                 currentUser = username;
+                socket.emit('setUser', username);
                 showCharacterScreen();
             } else {
-                alert('Invalid username or password.');
+                alert(result.message);
             }
         }
 
@@ -240,7 +282,9 @@
                 bulletCooldown: characters[type].bulletCooldown,
                 sprite: new Image(),
                 lastShot: 0,
-                type: type
+                type: type,
+                frame: 0,
+                frameCount: 4 // Assume 4-frame animation
             };
             player.sprite.src = characters[type].sprite;
             showMapScreen();
@@ -248,6 +292,7 @@
 
         function selectMap(map) {
             currentMap = map;
+            socket.emit('joinGame', { map, character: player.type, username: currentUser });
             startGame();
         }
 
@@ -257,56 +302,69 @@
             document.getElementById('mapScreen').style.display = 'none';
             canvas.style.display = 'block';
             document.getElementById('controls').style.display = 'block';
-
-            // Initialize game
-            bullets = [];
-            score = 0;
+            document.getElementById('hud').style.display = 'block';
+            document.getElementById('playerName').textContent = currentUser;
             walls = maps[currentMap].walls;
-            enemies = [
-                { x: 100, y: 100, health: 50, speed: 2, size: 16, sprite: new Image() },
-                { x: 700, y: 500, health: 80, speed: 1.5, size: 20, sprite: new Image() },
-                { x: 400, y: 300, health: 30, speed: 3, size: 12, sprite: new Image() }
-            ];
-            enemies.forEach(e => e.sprite.src = 'https://via.placeholder.com/32/FF6666');
-            powerUps = [];
-            otherPlayers = [
-                { x: 200, y: 200, health: 100, speed: 4, size: 16, sprite: new Image(), lastShot: 0, bulletCooldown: 1000 }
-            ];
-            otherPlayers.forEach(p => p.sprite.src = 'https://via.placeholder.com/32/6666FF');
-
-            // Spawn power-ups periodically
-            setInterval(spawnPowerUp, 10000);
+            score = 0;
+            document.getElementById('score').textContent = score;
+            document.getElementById('health').textContent = player.health;
+            sounds.bgm.play();
         }
 
-        // Power-up spawning
-        function spawnPowerUp() {
-            if (gameState !== 'playing') return;
-            const types = ['health', 'speed'];
-            const type = types[Math.floor(Math.random() * types.length)];
-            powerUps.push({
-                x: Math.random() * (MAP_WIDTH - POWERUP_SIZE * 2) + POWERUP_SIZE,
-                y: Math.random() * (MAP_HEIGHT - POWERUP_SIZE * 2) + POWERUP_SIZE,
-                type,
-                sprite: new Image()
-            });
-            powerUps[powerUps.length - 1].sprite.src = type === 'health' ? 'https://via.placeholder.com/32/00FF00' : 'https://via.placeholder.com/32/FFFF00';
-        }
+        // Socket.IO events
+        socket.on('gameState', (state) => {
+            players = state.players;
+            bullets = state.bullets;
+            enemies = state.enemies;
+            powerUps = state.powerUps;
+            if (players[socket.id]) {
+                player.health = players[socket.id].health;
+                document.getElementById('health').textContent = player.health;
+                if (player.health <= 0 && gameState === 'playing') showGameOver();
+            }
+        });
 
-        // Shoot bullet
-        function shootBullet(shooter) {
-            const dx = mouse.x - shooter.x;
-            const dy = mouse.y - shooter.y;
-            const mag = Math.sqrt(dx * dx + dy * dy);
-            const vx = (dx / mag) * 10;
-            const vy = (dy / mag) * 10;
+        socket.on('updateScore', (newScore) => {
+            score = newScore;
+            document.getElementById('score').textContent = score;
+        });
 
-            bullets.push({
-                x: shooter.x,
-                y: shooter.y,
-                vx: vx,
-                vy: vy,
-                owner: shooter
+        socket.on('leaderboard', (leaderboard) => {
+            const ul = document.getElementById('leaderboard');
+            ul.innerHTML = '';
+            leaderboard.forEach(entry => {
+                const li = document.createElement('li');
+                li.textContent = `${entry.username}: ${entry.score}`;
+                ul.appendChild(li);
             });
+        });
+
+        // Power-up spawning (server handles)
+        socket.on('spawnPowerUp', (powerUp) => {
+            powerUp.sprite = new Image();
+            powerUp.sprite.src = powerUp.type === 'health' ? '/assets/sprites/health.png' : '/assets/sprites/speed.png';
+            powerUps.push(powerUp);
+        });
+
+        // Update player
+        function updatePlayer() {
+            if (!player) return;
+            let dx = 0, dy = 0;
+            if (keys['w']) dy -= player.speed;
+            if (keys['s']) dy += player.speed;
+            if (keys['a']) dx -= player.speed;
+            if (keys['d']) dx += player.speed;
+
+            const newX = player.x + dx;
+            const newY = player.y + dy;
+            if (!checkCollision(newX, newY, PLAYER_SIZE)) {
+                player.x = newX;
+                player.y = newY;
+                socket.emit('move', { x: player.x, y: player.y });
+            }
+
+            // Animation
+            if (dx !== 0 || dy !== 0) player.frame = (player.frame + 0.1) % player.frameCount;
         }
 
         // Collision detection
@@ -321,120 +379,16 @@
             return false;
         }
 
-        // Update player
-        function updatePlayer() {
-            let dx = 0, dy = 0;
-            if (keys['w']) dy -= player.speed;
-            if (keys['s']) dy += player.speed;
-            if (keys['a']) dx -= player.speed;
-            if (keys['d']) dx += player.speed;
-
-            const newX = player.x + dx;
-            const newY = player.y + dy;
-            if (!checkCollision(newX, newY, PLAYER_SIZE)) {
-                player.x = newX;
-                player.y = newY;
-            }
-
-            // Check power-up collision
-            powerUps = powerUps.filter(p => {
-                const dx = player.x - p.x;
-                const dy = player.y - p.y;
-                if (Math.sqrt(dx * dx + dy * dy) < PLAYER_SIZE + POWERUP_SIZE) {
-                    if (p.type === 'health') player.health = Math.min(player.health + 50, player.maxHealth);
-                    if (p.type === 'speed') player.speed *= 1.5; // Temporary boost
-                    // const collectSound = new Audio('collect.mp3'); collectSound.play();
-                    return false;
-                }
-                return true;
-            });
-
-            // Restart game
-            if (player.health <= 0 && keys['r']) {
-                showMenu();
-            }
-        }
-
-        // Update bullets
-        function updateBullets() {
-            bullets = bullets.filter(bullet => {
-                bullet.x += bullet.vx;
-                bullet.y += bullet.vy;
-                if (bullet.x < 0 || bullet.x > MAP_WIDTH || bullet.y < 0 || bullet.y > MAP_HEIGHT) return false;
-                for (const wall of walls) {
-                    if (bullet.x > wall.x && bullet.x < wall.x + wall.width &&
-                        bullet.y > wall.y && bullet.y < wall.y + wall.height) {
-                        return false;
-                    }
-                }
-                return true;
-            });
-
-            // Bullet collisions
-            bullets.forEach(bullet => {
-                enemies.forEach(enemy => {
-                    const dx = bullet.x - enemy.x;
-                    const dy = bullet.y - enemy.y;
-                    if (Math.sqrt(dx * dx + dy * dy) < enemy.size && bullet.owner !== enemy) {
-                        enemy.health -= 10;
-                        bullet.x = -100;
-                        if (enemy.health <= 0) score += 10;
-                    }
+        // Particle effects
+        function createParticles(x, y) {
+            for (let i = 0; i < 5; i++) {
+                particles.push({
+                    x, y,
+                    vx: (Math.random() - 0.5) * 5,
+                    vy: (Math.random() - 0.5) * 5,
+                    life: 30
                 });
-                if (bullet.owner !== player) {
-                    const dx = bullet.x - player.x;
-                    const dy = bullet.y - player.y;
-                    if (Math.sqrt(dx * dx + dy * dy) < PLAYER_SIZE) {
-                        player.health -= 5;
-                        bullet.x = -100;
-                    }
-                }
-            });
-
-            bullets = bullets.filter(b => b.x >= 0);
-            enemies = enemies.filter(e => e.health > 0);
-        }
-
-        // Update enemies
-        function updateEnemies() {
-            enemies.forEach(enemy => {
-                const dx = player.x - enemy.x;
-                const dy = player.y - enemy.y;
-                const mag = Math.sqrt(dx * dx + dy * dy);
-                if (mag > 0) {
-                    const newX = enemy.x + (dx / mag) * enemy.speed;
-                    const newY = enemy.y + (dy / mag) * enemy.speed;
-                    if (!checkCollision(newX, newY, enemy.size)) {
-                        enemy.x = newX;
-                        enemy.y = newY;
-                    }
-                }
-
-                if (Math.sqrt(dx * dx + dy * dy) < PLAYER_SIZE + enemy.size) {
-                    player.health -= 1;
-                }
-            });
-        }
-
-        // Update other players (simulated)
-        function updateOtherPlayers() {
-            otherPlayers.forEach(p => {
-                const dx = player.x - p.x;
-                const dy = player.y - p.y;
-                const mag = Math.sqrt(dx * dx + dy * dy);
-                if (mag > 0) {
-                    const newX = p.x + (dx / mag) * p.speed * 0.5;
-                    const newY = p.y + (dy / mag) * p.speed * 0.5;
-                    if (!checkCollision(newX, newY, p.size)) {
-                        p.x = newX;
-                        p.y = newY;
-                    }
-                }
-                if (Date.now() - p.lastShot > p.bulletCooldown) {
-                    shootBullet(p);
-                    p.lastShot = Date.now();
-                }
-            });
+            }
         }
 
         // Draw game
@@ -445,29 +399,30 @@
             ctx.fillStyle = '#666';
             walls.forEach(wall => ctx.fillRect(wall.x, wall.y, wall.width, wall.height));
 
-            // Draw player
-            if (player) {
-                ctx.drawImage(player.sprite, player.x - PLAYER_SIZE, player.y - PLAYER_SIZE, PLAYER_SIZE * 2, PLAYER_SIZE * 2);
+            // Draw players
+            for (const id in players) {
+                const p = players[id];
+                const img = new Image();
+                img.src = characters[p.type].sprite;
+                const frameWidth = 32; // Sprite sheet frame width
+                ctx.drawImage(img, Math.floor(p.frame) * frameWidth, 0, frameWidth, 32, p.x - PLAYER_SIZE, p.y - PLAYER_SIZE, PLAYER_SIZE * 2, PLAYER_SIZE * 2);
                 ctx.fillStyle = 'red';
-                ctx.fillRect(player.x - PLAYER_SIZE, player.y - PLAYER_SIZE - 10, (player.health / player.maxHealth) * PLAYER_SIZE * 2, 5);
+                ctx.fillRect(p.x - PLAYER_SIZE, p.y - PLAYER_SIZE - 10, (p.health / characters[p.type].health) * PLAYER_SIZE * 2, 5);
+                ctx.fillStyle = 'black';
+                ctx.font = '12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(p.username, p.x, p.y - PLAYER_SIZE - 15);
             }
 
             // Draw enemies
             enemies.forEach(enemy => {
                 ctx.drawImage(enemy.sprite, enemy.x - enemy.size, enemy.y - enemy.size, enemy.size * 2, enemy.size * 2);
                 ctx.fillStyle = 'red';
-                ctx.fillRect(enemy.x - enemy.size, enemy.y - enemy.size - 10, (enemy.health / 50) * enemy.size * 2, 5);
-            });
-
-            // Draw other players
-            otherPlayers.forEach(p => {
-                ctx.drawImage(p.sprite, p.x - p.size, p.y - p.size, p.size * 2, p.size * 2);
-                ctx.fillStyle = 'blue';
-                ctx.fillRect(p.x - p.size, p.y - p.size - 10, p.health / 100 * p.size * 2, 5);
+                ctx.fillRect(enemy.x - enemy.size, enemy.y - enemy.size - 10, (enemy.health / enemy.maxHealth) * enemy.size * 2, 5);
             });
 
             // Draw bullets
-            ctx.fillStyle = 'black';
+            ctx.fillStyle = 'yellow';
             bullets.forEach(bullet => {
                 ctx.beginPath();
                 ctx.arc(bullet.x, bullet.y, BULLET_SIZE, 0, Math.PI * 2);
@@ -479,33 +434,23 @@
                 ctx.drawImage(p.sprite, p.x - POWERUP_SIZE, p.y - POWERUP_SIZE, POWERUP_SIZE * 2, POWERUP_SIZE * 2);
             });
 
-            // Draw score
-            ctx.fillStyle = 'black';
-            ctx.font = '20px Arial';
-            ctx.textAlign = 'left';
-            ctx.fillText(`Score: ${score}`, 10, 30);
-            if (currentUser) ctx.fillText(`Player: ${currentUser}`, 10, 50);
-
-            // Draw game over
-            if (player && player.health <= 0) {
-                ctx.fillStyle = 'black';
-                ctx.font = '48px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText('Game Over', MAP_WIDTH / 2, MAP_HEIGHT / 2);
-                ctx.font = '24px Arial';
-                ctx.fillText('Press R to Restart', MAP_WIDTH / 2, MAP_HEIGHT / 2 + 40);
-            }
+            // Draw particles
+            particles = particles.filter(p => p.life > 0);
+            ctx.fillStyle = 'orange';
+            particles.forEach(p => {
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+                ctx.fill();
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life--;
+            });
         }
 
         // Game loop
         function gameLoop() {
-            if (gameState === 'playing' && player && player.health > 0) {
+            if (gameState === 'playing' && player) {
                 updatePlayer();
-                updateBullets();
-                updateEnemies();
-                updateOtherPlayers();
-                draw();
-            } else if (gameState === 'playing') {
                 draw();
             }
             requestAnimationFrame(gameLoop);
